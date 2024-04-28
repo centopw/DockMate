@@ -4,14 +4,15 @@
 print_cento() {
     cat << "EOF"
       
-# ______           _   ___  ___      _       
-# |  _  \         | |  |  \/  |     | |      
-# | | | |___   ___| | _| .  . | __ _| |_ ___ 
-# | | | / _ \ / __| |/ / |\/| |/ _` | __/ _ \
-# | |/ / (_) | (__|   <| |  | | (_| | ||  __/
-# |___/ \___/ \___|_|\_\_|  |_/\__,_|\__\___|
 
-#                       -- By Centopw
+______           _   ___  ___      _       
+|  _  \         | |  |  \/  |     | |      
+| | | |___   ___| | _| .  . | __ _| |_ ___ 
+| | | / _ \ / __| |/ / |\/| |/ _` | __/ _ \
+| |/ / (_) | (__|   <| |  | | (_| | ||  __/
+|___/ \___/ \___|_|\_\_|  |_/\__,_|\__\___|
+                                    --By Cento       
+                                    
                                            
 
 EOF
@@ -26,9 +27,7 @@ install_docker() {
     fi
 
     echo "Installing Docker..."
-    if command -v docker &>/dev/null; then
-        echo "Docker is already installed."
-    else
+    if ! command -v docker &>/dev/null; then
         curl -fsSL https://get.docker.com -o install-docker.sh
         if sudo sh install-docker.sh; then
             echo "Docker installed successfully."
@@ -36,6 +35,8 @@ install_docker() {
             echo "Error: Docker installation failed."
             exit 1
         fi
+    else
+        echo "Docker is already installed."
     fi
 }
 
@@ -45,9 +46,7 @@ install_docker_compose() {
     DOCKER_COMPOSE_URL="https://github.com/docker/compose/releases/download/${DOCKER_COMPOSE_VERSION}/docker-compose-$(uname -s)-$(uname -m)"
 
     echo "Installing Docker Compose..."
-    if command -v docker-compose &>/dev/null; then
-        echo "Docker Compose is already installed."
-    else
+    if ! command -v docker-compose &>/dev/null; then
         sudo curl -L "${DOCKER_COMPOSE_URL}" -o /usr/local/bin/docker-compose
         sudo chmod +x /usr/local/bin/docker-compose
         if docker-compose --version; then
@@ -56,6 +55,8 @@ install_docker_compose() {
             echo "Error: Docker Compose installation failed."
             exit 1
         fi
+    else
+        echo "Docker Compose is already installed."
     fi
 }
 
