@@ -1,4 +1,4 @@
-#!/bin/sh
+#!/bin/bash
 
 # ANSI color codes
 RED='\033[0;31m'
@@ -120,6 +120,7 @@ remove_docker_compose() {
 install_both() {
     install_docker
     install_docker_compose
+    echo -e "${GREEN}Install docker and docker-compose success.${NC}"
 }
 
 # Main function
@@ -128,15 +129,15 @@ main() {
 
     # Options for initial dialog
     initial_options=(
-        1 "Yes, install both Docker and Docker Compose"
-        2 "No, show advanced options"
+        1 "Use the default setup to install Docker and Docker Compose"
+        2 "Advance"
     )
 
     # Prompt user to install both Docker and Docker Compose
     choice=$(dialog --clear \
                     --backtitle "Welcome!" \
                     --title "Install Docker and Docker Compose?" \
-                    --menu "Do you want to install both Docker and Docker Compose?" \
+                    --menu "Do you want to use the default setup to install Docker and Docker Compose?" \
                     15 60 3 \
                     "${initial_options[@]}" \
                     2>&1 >/dev/tty)
@@ -169,8 +170,8 @@ advanced_options() {
                         2>&1 >/dev/tty)
 
         case $choice in
-            1) install_docker ;;
-            2) install_docker_compose ;;
+            1) install_docker && echo -e "${GREEN}Install Docker success.${NC}" ;;
+            2) install_docker_compose && echo -e "${GREEN}Install Docker Compose success.${NC}" ;;
             3) remove_docker ;;
             4) remove_docker_compose ;;
             5) exit ;;
