@@ -1,4 +1,4 @@
-#!/bin/bash
+#!/bin/sh
 
 # ANSI color codes
 RED='\033[0;31m'
@@ -20,6 +20,28 @@ print_cento() {
 
 #                       -- By Centopw
 EOF
+}
+
+# Function to detect Docker version
+detect_docker_version() {
+    docker_version=$(docker --version 2>/dev/null)
+    if [ -n "$docker_version" ]; then
+        echo -e "${BLUE}Detected Docker version:${NC}"
+        echo "$docker_version"
+    else
+        echo -e "${BLUE}Docker version:${NC} ${YELLOW}Not detected${NC}"
+    fi
+}
+
+# Function to detect Docker Compose version
+detect_docker_compose_version() {
+    docker_compose_version=$(docker-compose --version 2>/dev/null)
+    if [ -n "$docker_compose_version" ]; then
+        echo -e "${BLUE}Detected Docker Compose version:${NC}"
+        echo "$docker_compose_version"
+    else
+        echo -e "${BLUE}Docker Compose version:${NC} ${YELLOW}Not detected${NC}"
+    fi
 }
 
 # Function to install Docker
@@ -94,32 +116,62 @@ remove_docker_compose() {
     fi
 }
 
+# Function to install both Docker and Docker Compose
+install_both() {
+    install_docker
+    install_docker_compose
+}
+
 # Main function
 main() {
     print_cento
 
-    # Options for dialog
+    # Options for initial dialog
+    initial_options=(
+        1 "Yes, install both Docker and Docker Compose"
+        2 "No, show advanced options"
+    )
+
+    # Prompt user to install both Docker and Docker Compose
+    choice=$(dialog --clear \
+                    --backtitle "Welcome!" \
+                    --title "Install Docker and Docker Compose?" \
+                    --menu "Do you want to install both Docker and Docker Compose?" \
+                    15 60 3 \
+                    "${initial_options[@]}" \
+                    2>&1 >/dev/tty)
+
+    case $choice in
+        1) install_both ;;
+        2) advanced_options ;;
+        *) echo -e "${RED}Invalid choice. Exiting.${NC}" && exit 1 ;;
+    esac
+}
+
+# Function for advanced options menu
+advanced_options() {
+    # Options for advanced dialog
     options=(
         1 "Install Docker"
-        2 "Remove Docker"
-        3 "Install Docker Compose"
+        2 "Install Docker Compose"
+        3 "Remove Docker"
         4 "Remove Docker Compose"
         5 "Exit"
     )
 
     while true; do
         choice=$(dialog --clear \
-                        --backtitle "Choose an option" \
+                        --backtitle "Advanced Options" \
                         --title "Options" \
                         --menu "Choose an option:" \
-                        15 50 5 \
+                        20 60 6 \
                         "${options[@]}" \
                         2>&1 >/dev/tty)
 
         case $choice in
             1) install_docker ;;
-            2) remove_docker ;;
-            3) install_docker_compose ;;
+            2) install_docker_compose ;;
+            3) remove_docker ;;
             4) remove_docker_compose ;;
             5) exit ;;
             *) echo -e "${RED}Invalid choice. Please try again.${NC}" ;;
