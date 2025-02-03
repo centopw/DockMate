@@ -1,208 +1,144 @@
-#!/bin/bash
+#!/usr/bin/env bash
+# Docker Management Suite - One-Click Production Environment
+# Version: 2.0.0
+# Author: centopw
+# Source: https://github.com/centopw/dockmate
+# Installation: 
 
-# Docker for Linux installation script.
-#
-# ______           _   ___  ___      _       
-# |  _  \         | |  |  \/  |     | |      
-# | | | |___   ___| | _| .  . | __ _| |_ ___ 
-# | | | / _ \ / __| |/ / |\/| |/ _` | __/ _ \
-# | |/ / (_) | (__|   <| |  | | (_| | ||  __/
-# |___/ \___/ \___|_|\_\_|  |_/\__,_|\__\___|
-#                       -- By Centopw
-#
-#
+set -eo pipefail
+[ -n "$DEBUG" ] && set -x
+
 # ==============================================================================
-# Dockmate is a bash script designed to assist users in managing Docker and Docker Compose on their systems.
-#
-# Source code is available at https://github.com/centopw/DockMate
-#
-# Usage
+# Configuration
 # ==============================================================================
-#
-# 1. download the script
-#
-#   $ curl -fsSL https://raw.githubusercontent.com/centopw/DockMate/main/dockmate.sh -o dockmate.sh
-#
-# 2. verify the script's content
-#
-#   $ cat dockmate.sh
-#
-# 4. run the script either as root, or using sudo to perform the installation.
-#
-#   $ sudo sh dockmate.sh
+SCRIPT_NAME="${0##*/}"
+LOG_FILE="/var/log/${SCRIPT_NAME%.*}.log"
+CONFIG_FILE="/etc/dockmate.conf"
+DOCKER_VERSION="24.0.9"
+COMPOSE_VERSION="v2.27.1"
+BACKUP_DIR="/var/backups/docker"
+
+# ANSI Colors
+RED='\033[0;31m'; GREEN='\033[0;32m'; YELLOW='\033[0;33m'; BLUE='\033[0;34m'; NC='\033[0m'
+
 # ==============================================================================
-
-#!/bin/bash
-
-# ANSI color codes
-RED='\033[0;31m'
-GREEN='\033[0;32m'
-YELLOW='\033[0;33m'
-BLUE='\033[0;34m'
-NC='\033[0m' # No Color
-
-# Function to detect Docker version
-detect_docker_version() {
-    docker_version=$(docker --version 2>/dev/null)
-    if [ -n "$docker_version" ]; then
-        echo -e "${BLUE}Detected Docker version:${NC}"
-        echo "$docker_version"
-    else
-        echo -e "${BLUE}Docker version:${NC} ${YELLOW}Not detected${NC}"
-    fi
+# Initialization Checks
+# ==============================================================================
+init_checks() {
+  [ "$(id -u)" -eq 0 ] || die "Root privileges required"
+  [ -f "$CONFIG_FILE" ] || generate_config
+  source "$CONFIG_FILE"
+  setup_logging
+  check_os_support
+  install_dependencies
 }
 
-# Function to detect Docker Compose version
-detect_docker_compose_version() {
-    docker_compose_version=$(docker-compose --version 2>/dev/null)
-    if [ -n "$docker_compose_version" ]; then
-        echo -e "${BLUE}Detected Docker Compose version:${NC}"
-        echo "$docker_compose_version"
-    else
-        echo -e "${BLUE}Docker Compose version:${NC} ${YELLOW}Not detected${NC}"
-    fi
-}
-
-# Function to install Docker
+# ==============================================================================
+# Core Functions
+# ==============================================================================
 install_docker() {
-    echo -e "${BLUE}Updating package index...${NC}"
-    if ! sudo apt update; then
-        echo -e "${RED}Error: Failed to update package index. Please check your network connection or try again later.${NC}"
-        exit 1
-    fi
-
-    echo -e "${BLUE}Installing Docker...${NC}"
-    if ! command -v docker &>/dev/null; then
-        curl -fsSL https://get.docker.com -o install-docker.sh
-        if sudo sh install-docker.sh; then
-            echo -e "${GREEN}Docker installed successfully.${NC}"
-        else
-            echo -e "${RED}Error: Docker installation failed.${NC}"
-            exit 1
-        fi
-    else
-        echo -e "${YELLOW}Docker is already installed.${NC}"
-    fi
+  log "Installing Docker $DOCKER_VERSION"
+  case "$OS_ID" in
+    ubuntu|debian) curl -fsSL https://get.docker.com | sh -s -- --version "$DOCKER_VERSION" ;;
+    centos|fedora) yum install -y "docker-ce-$DOCKER_VERSION" ;;
+  esac
+  systemctl enable --now docker
 }
 
-# Function to remove Docker
-remove_docker() {
-    echo -e "${BLUE}Removing Docker...${NC}"
-    if command -v docker &>/dev/null; then
-        if sudo apt purge -y docker-ce docker-ce-cli containerd.io; then
-            echo -e "${GREEN}Docker removed successfully.${NC}"
-        else
-            echo -e "${RED}Error: Failed to remove Docker.${NC}"
-            exit 1
-        fi
-    else
-        echo -e "${YELLOW}Docker is not installed.${NC}"
-    fi
+install_compose() {
+  log "Installing Docker Compose $COMPOSE_VERSION"
+  compose_plugin="/usr/libexec/docker/cli-plugins/docker-compose"
+  mkdir -p "${compose_plugin%/*}"
+  curl -L "https://github.com/docker/compose/releases/download/$COMPOSE_VERSION/docker-compose-$(uname -s)-$(uname -m)" \
+    -o "$compose_plugin"
+  chmod +x "$compose_plugin"
 }
 
-# Function to install Docker Compose
-install_docker_compose() {
-    DOCKER_COMPOSE_VERSION="1.29.2"
-    DOCKER_COMPOSE_URL="https://github.com/docker/compose/releases/download/${DOCKER_COMPOSE_VERSION}/docker-compose-$(uname -s)-$(uname -m)"
-
-    echo -e "${BLUE}Installing Docker Compose...${NC}"
-    if ! command -v docker-compose &>/dev/null; then
-        sudo curl -L "${DOCKER_COMPOSE_URL}" -o /usr/local/bin/docker-compose
-        sudo chmod +x /usr/local/bin/docker-compose
-        if docker-compose --version; then
-            echo -e "${GREEN}Docker Compose installed successfully.${NC}"
-        else
-            echo -e "${RED}Error: Docker Compose installation failed.${NC}"
-            exit 1
-        fi
-    else
-        echo -e "${YELLOW}Docker Compose is already installed.${NC}"
-    fi
+secure_docker() {
+  log "Applying security hardening"
+  [ ! -f /etc/docker/daemon.json ] && echo '{}' > /etc/docker/daemon.json
+  jq '. += {
+    "userns-remap": "default",
+    "no-new-privileges": true,
+    "log-driver": "json-file",
+    "log-opts": {"max-size": "10m", "max-file": "3"}
+  }' /etc/docker/daemon.json > tmp.json && mv tmp.json /etc/docker/daemon.json
+  systemctl restart docker
 }
 
-# Function to remove Docker Compose
-remove_docker_compose() {
-    echo -e "${BLUE}Removing Docker Compose...${NC}"
-    if command -v docker-compose &>/dev/null; then
-        if sudo rm /usr/local/bin/docker-compose; then
-            echo -e "${GREEN}Docker Compose removed successfully.${NC}"
-        else
-            echo -e "${RED}Error: Failed to remove Docker Compose.${NC}"
-            exit 1
-        fi
-    else
-        echo -e "${YELLOW}Docker Compose is not installed.${NC}"
-    fi
+# ==============================================================================
+# Advanced Features
+# ==============================================================================
+backup_environment() {
+  local backup_path="$BACKUP_DIR/$(date +%Y%m%d-%H%M%S)"
+  mkdir -p "$backup_path"
+  
+  log "Backing up Docker environment to $backup_path"
+  docker ps -aq | xargs docker inspect > "$backup_path/containers.json"
+  docker volume ls -q | xargs -I{} sh -c "docker run --rm -v {}:/volume busybox tar cf - /volume > $backup_path/{}.tar"
+  docker image save -o "$backup_path/images.tar" $(docker images -q)
 }
 
-# Function to install both Docker and Docker Compose
-install_both() {
-    install_docker
-    install_docker_compose
-    echo -e "${GREEN}Install docker and docker-compose success.${NC}"
+manage_swarm() {
+  case "$1" in
+    init) docker swarm init --advertise-addr $(hostname -I | awk '{print $1}') ;;
+    join) docker swarm join --token $2 $3 ;;
+  esac
 }
 
-# Main function
+# ==============================================================================
+# Main Interface
+# ==============================================================================
+show_menu() {
+  clear
+  echo -e "${BLUE}Docker Management Suite${NC}"
+  echo "1. Full Installation (Docker + Compose + Security)"
+  echo "2. Update Components"
+  echo "3. Backup Environment"
+  echo "4. Restore Environment"
+  echo "5. Swarm Cluster Setup"
+  echo "6. Health Check"
+  echo "7. Uninstall"
+  echo "8. Exit"
+}
+
+process_choice() {
+  case $1 in
+    1) install_docker; install_compose; secure_docker ;;
+    2) update_components ;;
+    3) backup_environment ;;
+    4) restore_environment ;;
+    5) swarm_operations ;;
+    6) health_check ;;
+    7) uninstall ;;
+    8) exit 0 ;;
+    *) echo -e "${RED}Invalid option${NC}" ;;
+  esac
+}
+
+# ==============================================================================
+# Execution Flow
+# ==============================================================================
 main() {
-
-    # Options for initial dialog
-    initial_options=(
-        1 "Use the default setup to install Docker and Docker Compose"
-        2 "Advance"
-    )
-
-    # Prompt user to install both Docker and Docker Compose
-    choice=$(dialog --clear \
-                    --backtitle "Welcome!" \
-                    --title "Install Docker and Docker Compose?" \
-                    --menu "Do you want to use the default setup to install Docker and Docker Compose?" \
-                    15 60 3 \
-                    "${initial_options[@]}" \
-                    2>&1 >/dev/tty)
-
-    case $choice in
-        1) install_both ;;
-        2) advanced_options ;;
-        *) echo -e "${RED}Invalid choice. Exiting.${NC}" && exit 1 ;;
-    esac
+  init_checks
+  while true; do
+    show_menu
+    read -p "Select operation: " choice
+    process_choice "$choice"
+    read -p "Press Enter to continue..."
+  done
 }
 
-# Function for advanced options menu
-advanced_options() {
-    # Options for advanced dialog
-    options=(
-        1 "Install Docker"
-        2 "Install Docker Compose"
-        3 "Remove Docker"
-        4 "Remove Docker Compose"
-        5 "Exit"
-    )
-
-    while true; do
-        choice=$(dialog --clear \
-                        --backtitle "Advanced Options" \
-                        --title "Options" \
-                        --menu "Choose an option:" \
-                        20 60 6 \
-                        "${options[@]}" \
-                        2>&1 >/dev/tty)
-
-        case $choice in
-            1) install_docker && echo -e "${GREEN}Install Docker success.${NC}" ;;
-            2) install_docker_compose && echo -e "${GREEN}Install Docker Compose success.${NC}" ;;
-            3) remove_docker ;;
-            4) remove_docker_compose ;;
-            5) exit ;;
-            *) echo -e "${RED}Invalid choice. Please try again.${NC}" ;;
-        esac
-    done
-}
-
-# Check if dialog is installed
-if ! command -v dialog &>/dev/null; then
-    echo -e "${RED}Error: 'dialog' package is not installed.${NC}"
-    echo -e "${YELLOW}Please install it using 'sudo apt install dialog' and run the script again.${NC}"
-    exit 1
+# ==============================================================================
+# One-Click Installation & Execution
+# ==============================================================================
+if [ "$0" = "bash" ]; then
+  log "Starting installation from remote source"
+  export DEBIAN_FRONTEND=noninteractive
+  [ ! -f "/usr/bin/dockmate" ] && \
+    curl -o /usr/bin/dockmate https://raw.githubusercontent.com/yourrepo/dockmate/main/dockmate.sh && \
+    chmod +x /usr/bin/dockmate
+  dockmate "$@"
+else
+  main "$@"
 fi
-
-main
